@@ -15,6 +15,7 @@ const {
   TextInputBuilder,
   TextInputStyle,
   EmbedBuilder,
+  MessageFlags,
 } = require("discord.js");
 
 // =====================================================
@@ -90,7 +91,8 @@ const REQUEST_TIMEOUT_MS = 30000;
 const MAX_RETRIES = 4;
 const RETRY_BASE_DELAY_MS = 1200;
 
-// Sesuaikan datastore di sini
+// Sesuaikan datastore di sini.
+// Dari kode Anda saat ini, yang terisi ada 9 datastore. Tambahkan 1 lagi jika memang total harus 10.
 const DATASTORES = [
   { name: "CoupleSystem_V1", scope: "global", keyBuilder: (userId) => `${userId}` },
   { name: "DailyStreak_WIB_V1", scope: "global", keyBuilder: (userId) => `${userId}` },
@@ -138,8 +140,11 @@ const sourceHttp = createRobloxHttp(SOURCE_API_KEY);
 const targetHttp = createRobloxHttp(TARGET_API_KEY);
 
 function getRetryAfterMs(err) {
-  const raw = err?.response?.headers?.["retry-after"];
+  const raw =
+    err?.response?.headers?.["retry-after"] ||
+    err?.response?.headers?.["Retry-After"];
   if (!raw) return null;
+
   const n = Number(raw);
   if (Number.isFinite(n)) return n * 1000;
   return null;
@@ -153,6 +158,7 @@ function getErrorMessage(err) {
       return String(err.response.data);
     }
   }
+
   return err?.message || String(err);
 }
 
@@ -164,6 +170,13 @@ function isRetryable(err) {
   const status = getErrorStatus(err);
   if (!status) return true;
   return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+}
+
+function isUnknownInteractionError(err) {
+  return (
+    err?.code === 10062 ||
+    String(err?.message || "").toLowerCase().includes("unknown interaction")
+  );
 }
 
 async function withRetry(label, fn, job = null) {
@@ -510,6 +523,7 @@ function cancelJob(job, reason = "Cancelled by user") {
   if (!job || job.cancelled) return;
   job.cancelled = true;
   job.cancelReason = reason;
+
   try {
     job.abortController.abort(reason);
   } catch (_) {}
@@ -540,7 +554,6 @@ async function processTransferJob(job) {
     .setTimestamp();
 
   await ticketChannel.send({
-    content: `<@${discordUser.id}>`,
     embeds: [progressEmbed],
     components: buildCloseTicketComponents(),
   });
@@ -683,7 +696,7 @@ async function closeTicketFlow(interaction) {
 
   await interaction.reply({
     content: "Ticket akan ditutup.",
-    ephemeral: true,
+    flags: MessageFlags.Ephemeral,
   });
 
   if (job) {
@@ -694,6 +707,17 @@ async function closeTicketFlow(interaction) {
 
   await safeDeleteChannel(channel);
 }
+
+function cleanupExpiredConfirmations() {
+  const now = Date.now();
+  for (const [userId, data] of pendingConfirmations.entries()) {
+    if (now - data.createdAt > 10 * 60 * 1000) {
+      pendingConfirmations.delete(userId);
+    }
+  }
+}
+
+setInterval(cleanupExpiredConfirmations, 60 * 1000);
 
 // =====================================================
 // INTERACTIONS
@@ -717,7 +741,7 @@ client.on("interactionCreate", async (interaction) => {
       await interaction.reply({
         embeds: [confirmEmbed],
         components: buildConfirmComponents(),
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -729,7 +753,7 @@ client.on("interactionCreate", async (interaction) => {
       if (!pending) {
         await interaction.reply({
           content: "Konfirmasi sudah kadaluarsa. Silakan klik tombol TRANSFER DATA lagi.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
@@ -753,12 +777,14 @@ client.on("interactionCreate", async (interaction) => {
       if (!username) {
         await interaction.reply({
           content: "Username tidak boleh kosong.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
         return;
       }
 
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.deferReply({
+        flags: MessageFlags.Ephemeral,
+      });
 
       let robloxUser;
       try {
@@ -878,20 +904,25 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
   } catch (err) {
+    if (isUnknownInteractionError(err)) {
+      console.error("Interaction expired or already acknowledged:", err.message);
+      return;
+    }
+
     console.error("interactionCreate error:", getErrorMessage(err));
 
     if (interaction.deferred || interaction.replied) {
       try {
         await interaction.followUp({
           content: `Terjadi error: ${getErrorMessage(err)}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       } catch (_) {}
     } else {
       try {
         await interaction.reply({
           content: `Terjadi error: ${getErrorMessage(err)}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       } catch (_) {}
     }
@@ -901,7 +932,7 @@ client.on("interactionCreate", async (interaction) => {
 // =====================================================
 // READY
 // =====================================================
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`Logged in as ${client.user.tag}`);
   await ensurePanelMessage();
 });
