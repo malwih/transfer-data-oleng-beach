@@ -50,7 +50,7 @@ const TARGET_API_KEY = process.env.TARGET_API_KEY;
 const AUTO_SEND_PANEL = String(process.env.AUTO_SEND_PANEL || "true") === "true";
 const PANEL_MESSAGE_TEXT =
   process.env.PANEL_MESSAGE_TEXT ||
-  "Klik tombol di bawah untuk melakukan transfer data dari Experience A ke Experience B.";
+  "Klik tombol di bawah untuk melakukan transfer data dari Map Lama ke Map Baru.";
 
 // =====================================================
 // VALIDATION
@@ -404,7 +404,7 @@ function buildCloseTicketComponents() {
 function buildTransferModal() {
   return new ModalBuilder()
     .setCustomId("transfer_modal")
-    .setTitle("Transfer Data Roblox")
+    .setTitle("Transfer Data Map Oleng Beach")
     .addComponents(
       new ActionRowBuilder().addComponents(
         new TextInputBuilder()
@@ -431,7 +431,7 @@ async function ensurePanelMessage() {
     }
 
     const embed = new EmbedBuilder()
-      .setTitle("Transfer Data Experience")
+      .setTitle("Transfer Data Map Oleng Beach")
       .setDescription(PANEL_MESSAGE_TEXT)
       .setColor(0x2b8cff)
       .setFooter({ text: "Gunakan tombol untuk memulai transfer data." })
