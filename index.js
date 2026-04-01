@@ -92,7 +92,7 @@ const MAX_RETRIES = 4;
 const RETRY_BASE_DELAY_MS = 1200;
 
 // Sesuaikan datastore di sini.
-// Dari kode Anda saat ini, yang terisi ada 9 datastore. Tambahkan 1 lagi jika memang total harus 10.
+// Saat ini sesuai kode Anda: 9 datastore.
 const DATASTORES = [
   { name: "CoupleSystem_V1", scope: "global", keyBuilder: (userId) => `${userId}` },
   { name: "DailyStreak_WIB_V1", scope: "global", keyBuilder: (userId) => `${userId}` },
@@ -503,11 +503,23 @@ async function lockTicketChannel(channel, discordUserId) {
   ]);
 }
 
+async function safeLockTicketChannel(channel, discordUserId) {
+  try {
+    await lockTicketChannel(channel, discordUserId);
+    return { ok: true };
+  } catch (err) {
+    console.log(`Failed to lock ticket channel ${channel.id}: ${getErrorMessage(err)}`);
+    return { ok: false, error: err };
+  }
+}
+
 async function safeSendDM(user, content) {
   try {
     await user.send(content);
+    return true;
   } catch (err) {
     console.log(`Failed to DM user ${user.id}: ${getErrorMessage(err)}`);
+    return false;
   }
 }
 
@@ -652,6 +664,8 @@ async function processTransferJob(job) {
         "",
         "### Hasil per datastore",
         detailText || "Tidak ada detail.",
+        "",
+        "**Silakan masuk bermain lagi ke Map Oleng Beach.**",
       ].join("\n")
     )
     .setColor(0x2ecc71)
@@ -662,7 +676,14 @@ async function processTransferJob(job) {
     components: buildCloseTicketComponents(),
   });
 
-  await lockTicketChannel(ticketChannel, discordUser.id);
+  const lockResult = await safeLockTicketChannel(ticketChannel, discordUser.id);
+  if (!lockResult.ok) {
+    try {
+      await ticketChannel.send(
+        "Transfer data berhasil, tetapi bot tidak bisa mengunci ticket secara otomatis karena permission bot kurang."
+      );
+    } catch (_) {}
+  }
 
   await safeSendDM(
     discordUser,
@@ -674,6 +695,8 @@ async function processTransferJob(job) {
       `Berhasil dipindahkan: ${movedCount}`,
       `Di-skip: ${skippedCount}`,
       `Gagal: ${failedCount}`,
+      "",
+      "Silakan masuk bermain lagi ke Map Oleng Beach.",
     ].join("\n")
   );
 }
@@ -724,7 +747,6 @@ setInterval(cleanupExpiredConfirmations, 60 * 1000);
 // =====================================================
 client.on("interactionCreate", async (interaction) => {
   try {
-    // BUTTON: TRANSFER DATA
     if (interaction.isButton() && interaction.customId === "transfer_data") {
       pendingConfirmations.set(interaction.user.id, {
         createdAt: Date.now(),
@@ -746,7 +768,6 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // BUTTON: SUDAH
     if (interaction.isButton() && interaction.customId === "confirm_already_left_map") {
       const pending = pendingConfirmations.get(interaction.user.id);
 
@@ -763,13 +784,11 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // BUTTON: CLOSE TICKET
     if (interaction.isButton() && interaction.customId === "close_ticket") {
       await closeTicketFlow(interaction);
       return;
     }
 
-    // MODAL SUBMIT
     if (interaction.isModalSubmit() && interaction.customId === "transfer_modal") {
       const usernameInput = interaction.fields.getTextInputValue("roblox_username");
       const username = sanitizeUsername(usernameInput);
