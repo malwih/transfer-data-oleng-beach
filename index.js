@@ -91,8 +91,7 @@ const REQUEST_TIMEOUT_MS = 30000;
 const MAX_RETRIES = 4;
 const RETRY_BASE_DELAY_MS = 1200;
 
-// Sesuaikan datastore di sini.
-// Saat ini sesuai kode Anda: 9 datastore.
+// Sesuaikan datastore di sini
 const DATASTORES = [
   { name: "CoupleSystem_V1", scope: "global", keyBuilder: (userId) => `${userId}` },
   { name: "DailyStreak_WIB_V1", scope: "global", keyBuilder: (userId) => `${userId}` },
@@ -124,6 +123,10 @@ function sanitizeUsername(input) {
     .trim()
     .replace(/^@+/, "")
     .replace(/\s+/g, "");
+}
+
+function normalizeCompareText(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function createRobloxHttp(apiKey) {
@@ -328,6 +331,7 @@ async function writeTargetEntry(datastoreName, scope, key, value, job) {
 
 async function resolveRobloxUser(username) {
   const clean = sanitizeUsername(username);
+  if (!clean) return null;
 
   const res = await axios.post(
     ROBLOX_USERS_API,
@@ -343,16 +347,24 @@ async function resolveRobloxUser(username) {
     }
   );
 
-  const data = res.data?.data || [];
-  if (!Array.isArray(data) || data.length === 0) return null;
+  const list = Array.isArray(res.data?.data) ? res.data.data : [];
+  if (list.length === 0) return null;
 
-  const user = data[0];
-  if (!user?.id || !user?.name) return null;
+  const inputNormalized = normalizeCompareText(clean);
+
+  const exactMatch = list.find((user) => {
+    const nameMatch = normalizeCompareText(user?.name) === inputNormalized;
+    const requestedMatch =
+      normalizeCompareText(user?.requestedUsername) === inputNormalized;
+    return Boolean(user?.id) && (nameMatch || requestedMatch);
+  });
+
+  if (!exactMatch) return null;
 
   return {
-    id: String(user.id),
-    name: user.name,
-    displayName: user.displayName || user.name,
+    id: String(exactMatch.id),
+    name: exactMatch.name,
+    displayName: exactMatch.displayName || exactMatch.name,
   };
 }
 
@@ -506,10 +518,8 @@ async function lockTicketChannel(channel, discordUserId) {
 async function safeLockTicketChannel(channel, discordUserId) {
   try {
     await lockTicketChannel(channel, discordUserId);
-    return { ok: true };
   } catch (err) {
     console.log(`Failed to lock ticket channel ${channel.id}: ${getErrorMessage(err)}`);
-    return { ok: false, error: err };
   }
 }
 
@@ -676,14 +686,7 @@ async function processTransferJob(job) {
     components: buildCloseTicketComponents(),
   });
 
-  const lockResult = await safeLockTicketChannel(ticketChannel, discordUser.id);
-  if (!lockResult.ok) {
-    try {
-      await ticketChannel.send(
-        "Transfer data berhasil, tetapi bot tidak bisa mengunci ticket secara otomatis karena permission bot kurang."
-      );
-    } catch (_) {}
-  }
+  await safeLockTicketChannel(ticketChannel, discordUser.id);
 
   await safeSendDM(
     discordUser,
@@ -817,7 +820,7 @@ client.on("interactionCreate", async (interaction) => {
 
       if (!robloxUser) {
         await interaction.editReply({
-          content: `Username Roblox **${username}** tidak ditemukan.`,
+          content: `Username Roblox **${username}** tidak terdaftar di Roblox.`,
         });
         return;
       }
