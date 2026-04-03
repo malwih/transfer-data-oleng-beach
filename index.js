@@ -741,6 +741,20 @@ function cancelJob(job, reason = "Cancelled by user") {
   } catch (_) {}
 }
 
+function findActiveJobByRobloxUserId(robloxUserId) {
+  for (const job of activeJobs.values()) {
+    if (!job) continue;
+    if (job.cancelled) continue;
+    if (!job.ticketChannel) continue;
+
+    if (String(job.robloxUser?.id) === String(robloxUserId)) {
+      return job;
+    }
+  }
+
+  return null;
+}
+
 function getSelectedDatastoresForJob(job) {
   const names = Array.isArray(job.selectedDatastores) && job.selectedDatastores.length > 0
     ? job.selectedDatastores
@@ -1524,6 +1538,24 @@ client.on("interactionCreate", async (interaction) => {
         });
         return;
       }
+
+      const existingJob = findActiveJobByRobloxUserId(robloxUser.id);
+
+if (existingJob) {
+  await interaction.editReply({
+    content: [
+      "⚠️ Username Roblox ini sudah memiliki ticket transfer yang masih aktif.",
+      "",
+      `👤 Username: ${robloxUser.name}`,
+      `🪪 Display Name: ${robloxUser.displayName}`,
+      `🆔 User ID: ${robloxUser.id}`,
+      "",
+      `Silakan lanjutkan di ticket yang sudah ada: ${existingJob.ticketChannel}`,
+      "Kalau ingin membuat ticket baru, tutup ticket yang lama terlebih dahulu.",
+    ].join("\n"),
+  });
+  return;
+}
 
       const guild = interaction.guild;
       const discordUser = interaction.user;
