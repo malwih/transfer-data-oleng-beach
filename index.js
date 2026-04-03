@@ -550,7 +550,11 @@ function buildDatastoreSelectComponents(job) {
       new ButtonBuilder()
         .setCustomId("start_selected_transfer")
         .setLabel("✅ Mulai Transfer Sekarang")
-        .setStyle(ButtonStyle.Success)
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId("close_ticket")
+        .setLabel("🗑️ Close Ticket")
+        .setStyle(ButtonStyle.Danger)
     ),
   ];
 }
@@ -1133,14 +1137,16 @@ async function processTransferJob(job) {
     all: results,
   };
 
+  await sendCategoryDetailEmbeds(ticketChannel, "✅ Detail Datastore Berhasil", 0x2ecc71, summary.success);
+  await sendCategoryDetailEmbeds(ticketChannel, "⏭️ Detail Datastore Skip", 0xf1c40f, summary.skipped);
+  await sendCategoryDetailEmbeds(ticketChannel, "❌ Detail Datastore Gagal", 0xe74c3c, summary.failed);
+
   await ticketChannel.send({
     embeds: [buildSuccessSummaryEmbed(job, summary)],
     components: buildRetryTransferComponents(),
   });
 
-  await sendCategoryDetailEmbeds(ticketChannel, "✅ Detail Datastore Berhasil", 0x2ecc71, summary.success);
-  await sendCategoryDetailEmbeds(ticketChannel, "⏭️ Detail Datastore Skip", 0xf1c40f, summary.skipped);
-  await sendCategoryDetailEmbeds(ticketChannel, "❌ Detail Datastore Gagal", 0xe74c3c, summary.failed);
+  resetAutoCloseTimer(job);
 
   await safeLockTicketChannel(ticketChannel, discordUser.id);
 
@@ -1148,15 +1154,24 @@ async function processTransferJob(job) {
 }
 
 function setupAutoClose(job) {
+  if (job.autoCloseTimeout) {
+    clearTimeout(job.autoCloseTimeout);
+    job.autoCloseTimeout = null;
+  }
+
   job.autoCloseTimeout = setTimeout(async () => {
     try {
-      cancelJob(job, "Auto close after 30 minutes");
+      cancelJob(job, "Auto close after 30 minutes after success");
       await safeDeleteChannel(job.ticketChannel);
       activeJobs.delete(job.ticketChannel.id);
     } catch (err) {
       console.log("Auto close error:", getErrorMessage(err));
     }
   }, 30 * 60 * 1000);
+}
+
+function resetAutoCloseTimer(job) {
+  setupAutoClose(job);
 }
 
 async function closeTicketFlow(interaction) {
@@ -1310,6 +1325,11 @@ client.on("interactionCreate", async (interaction) => {
       job.cancelReason = null;
       job.abortController = new AbortController();
       job.running = true;
+
+      if (job.autoCloseTimeout) {
+  clearTimeout(job.autoCloseTimeout);
+  job.autoCloseTimeout = null;
+}
 
       await interaction.reply({
         content: "🔁 Transfer ulang dimulai. Mohon tunggu...",
@@ -1577,7 +1597,6 @@ if (existingJob) {
       };
 
       activeJobs.set(ticketChannel.id, job);
-      setupAutoClose(job);
 
       await ticketChannel.send({
         content: `<@${discordUser.id}>`,
