@@ -11,6 +11,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -50,7 +51,7 @@ const TARGET_API_KEY = process.env.TARGET_API_KEY;
 const AUTO_SEND_PANEL = String(process.env.AUTO_SEND_PANEL || "true") === "true";
 const PANEL_MESSAGE_TEXT =
   process.env.PANEL_MESSAGE_TEXT ||
-  "Klik tombol di bawah untuk melakukan transfer data dari Map Lama ke Map Baru.";
+  "Klik tombol di bawah untuk memulai proses transfer data akun kamu dari **Map Lama** ke **Map Baru**.";
 
 // =====================================================
 // VALIDATION
@@ -91,18 +92,74 @@ const REQUEST_TIMEOUT_MS = 30000;
 const MAX_RETRIES = 4;
 const RETRY_BASE_DELAY_MS = 1200;
 
-// Sesuaikan datastore di sini
 const DATASTORES = [
-  { name: "CoupleSystem_V1", scope: "global", keyBuilder: (userId) => `${userId}` },
-  { name: "DailyStreak_WIB_V1", scope: "global", keyBuilder: (userId) => `${userId}` },
-  { name: "EmoteFavorites_v1", scope: "global", keyBuilder: (userId) => `Player_${userId}` },
-  { name: "GamepassTitleData_v1", scope: "global", keyBuilder: (userId) => `Player_${userId}` },
-  { name: "HoloMusicFavorites_v1", scope: "global", keyBuilder: (userId) => `${userId}` },
-  { name: "PlayerLikes_v1", scope: "global", keyBuilder: (userId) => `${userId}` },
-  { name: "PlayerStats", scope: "global", keyBuilder: (userId) => `Player_${userId}` },
-  { name: "PlayerStatus_v1", scope: "global", keyBuilder: (userId) => `${userId}` },
-  { name: "TitleData_v1", scope: "global", keyBuilder: (userId) => `Player_${userId}` },
+  {
+    name: "CoupleSystem_V1",
+    label: "Couple",
+    description: "Data couple / pasangan",
+    scope: "global",
+    keyBuilder: (userId) => `${userId}`,
+  },
+  {
+    name: "PlayerLikes_v1",
+    label: "Like",
+    description: "Data like pemain",
+    scope: "global",
+    keyBuilder: (userId) => `${userId}`,
+  },
+  {
+    name: "DailyStreak_WIB_V1",
+    label: "Streak",
+    description: "Data streak harian",
+    scope: "global",
+    keyBuilder: (userId) => `${userId}`,
+  },
+  {
+    name: "PlayerStatus_v1",
+    label: "Status Player",
+    description: "Status player",
+    scope: "global",
+    keyBuilder: (userId) => `${userId}`,
+  },
+  {
+    name: "EmoteFavorites_v1",
+    label: "Emote Favorite",
+    description: "Emote favorit pemain",
+    scope: "global",
+    keyBuilder: (userId) => `Player_${userId}`,
+  },
+  {
+    name: "GamepassTitleData_v1",
+    label: "Title (via tombol)",
+    description: "Title dari fitur tombol",
+    scope: "global",
+    keyBuilder: (userId) => `Player_${userId}`,
+  },
+  {
+    name: "HoloMusicFavorites_v1",
+    label: "Music Favorite",
+    description: "Musik favorit pemain",
+    scope: "global",
+    keyBuilder: (userId) => `${userId}`,
+  },
+  {
+    name: "PlayerStats",
+    label: "Jumlah Donate",
+    description: "Jumlah donate pemain",
+    scope: "global",
+    keyBuilder: (userId) => `Player_${userId}`,
+  },
+  {
+    name: "TitleData_v1",
+    label: "VVIP dan Title (dari admin)",
+    description: "VVIP dan title dari admin",
+    scope: "global",
+    keyBuilder: (userId) => `Player_${userId}`,
+  },
 ];
+
+const DATASTORE_MAP = new Map(DATASTORES.map((ds) => [ds.name, ds]));
+const ALL_DATASTORE_NAMES = DATASTORES.map((ds) => ds.name);
 
 // =====================================================
 // MEMORY STORE
@@ -180,6 +237,34 @@ function isUnknownInteractionError(err) {
     err?.code === 10062 ||
     String(err?.message || "").toLowerCase().includes("unknown interaction")
   );
+}
+
+function formatJson(value, maxLength = 1200) {
+  try {
+    const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength)}... [dipotong]`;
+  } catch {
+    const text = String(value);
+    if (text.length <= maxLength) return text;
+    return `${text.slice(0, maxLength)}... [dipotong]`;
+  }
+}
+
+function isDeepEqual(a, b) {
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return String(a) === String(b);
+  }
+}
+
+function chunkArray(arr, size) {
+  const chunks = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  return chunks;
 }
 
 async function withRetry(label, fn, job = null) {
@@ -368,12 +453,20 @@ async function resolveRobloxUser(username) {
   };
 }
 
+function formatIdentityLines(robloxUser) {
+  return [
+    `**👤 Username:** ${robloxUser.name}`,
+    `**🪪 Display Name:** ${robloxUser.displayName}`,
+    `**🆔 User ID:** ${robloxUser.id}`,
+  ];
+}
+
 function buildPanelComponents() {
   return [
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("transfer_data")
-        .setLabel("TRANSFER DATA")
+        .setLabel("🚀 TRANSFER DATA")
         .setStyle(ButtonStyle.Success)
     ),
   ];
@@ -384,8 +477,23 @@ function buildConfirmComponents() {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("confirm_already_left_map")
-        .setLabel("SUDAH")
+        .setLabel("✅ SUDAH, SAYA SUDAH KELUAR MAP")
         .setStyle(ButtonStyle.Primary)
+    ),
+  ];
+}
+
+function buildOverwriteConfirmComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("agree_overwrite_transfer")
+        .setLabel("✅ SETUJU")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId("disagree_overwrite_transfer")
+        .setLabel("❌ TIDAK SETUJU")
+        .setStyle(ButtonStyle.Danger)
     ),
   ];
 }
@@ -395,8 +503,54 @@ function buildCloseTicketComponents() {
     new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("close_ticket")
-        .setLabel("CLOSE TICKET")
+        .setLabel("🗑️ CLOSE TICKET")
         .setStyle(ButtonStyle.Danger)
+    ),
+  ];
+}
+
+function buildRetryTransferComponents() {
+  return [
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("retry_transfer")
+        .setLabel("🔁 TRANSFER ULANG")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("close_ticket")
+        .setLabel("🗑️ CLOSE TICKET")
+        .setStyle(ButtonStyle.Danger)
+    ),
+  ];
+}
+
+function buildDatastoreSelectComponents(job) {
+  const selected = new Set(job.selectedDatastores || []);
+  const options = DATASTORES.map((ds) => ({
+    label: ds.label,
+    description: ds.description,
+    value: ds.name,
+    default: selected.has(ds.name),
+  }));
+
+  return [
+    new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("select_datastores")
+        .setPlaceholder("📦 Pilih datastore yang ingin ditransfer")
+        .setMinValues(1)
+        .setMaxValues(DATASTORES.length)
+        .addOptions(options)
+    ),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("select_all_datastores")
+        .setLabel("📦 Pilih Semua")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId("start_selected_transfer")
+        .setLabel("✅ Mulai Transfer Sekarang")
+        .setStyle(ButtonStyle.Success)
     ),
   ];
 }
@@ -418,6 +572,33 @@ function buildTransferModal() {
     );
 }
 
+function buildDatastoreSelectionEmbed(job) {
+  const selectedNames = (job.selectedDatastores || [])
+    .map((name) => DATASTORE_MAP.get(name)?.label || name)
+    .join(", ");
+
+  return new EmbedBuilder()
+    .setTitle("📦 Pilih Data yang Ingin Ditransfer")
+    .setDescription(
+      [
+        ...formatIdentityLines(job.robloxUser),
+        "",
+        "Silakan pilih **data mana saja** yang ingin kamu transfer dari **Map Lama** ke **Map Baru**.",
+        "Kamu bisa pilih **satu data**, **beberapa data**, atau langsung klik **Pilih Semua**.",
+        "",
+        `**📌 Pilihan saat ini:** ${selectedNames || "Belum ada datastore yang dipilih."}`,
+        "",
+        "⚠️ **Catatan Penting:**",
+        "**Title (dari admin)** tidak dijamin 100% berhasil karena title dari admin **tidak permanen**.",
+        "Kalau title dari admin tidak muncul setelah transfer, artinya **masa berlakunya sudah habis**.",
+        "",
+        "Setelah selesai memilih, klik tombol **✅ Mulai Transfer Sekarang** untuk melanjutkan proses.",
+      ].join("\n")
+    )
+    .setColor(0x5865f2)
+    .setTimestamp();
+}
+
 async function ensurePanelMessage() {
   if (!AUTO_SEND_PANEL) return;
 
@@ -431,10 +612,19 @@ async function ensurePanelMessage() {
     }
 
     const embed = new EmbedBuilder()
-      .setTitle("Transfer Data Map Oleng Beach")
-      .setDescription(PANEL_MESSAGE_TEXT)
+      .setTitle("🚀 Transfer Data Map Oleng Beach")
+      .setDescription(
+        [
+          PANEL_MESSAGE_TEXT,
+          "",
+          "📌 **Fungsi tombol ini:** memindahkan data akun kamu dari **Map Lama** ke **Map Baru**.",
+          "⚠️ Pastikan kamu sudah **keluar dari map** sebelum memulai proses transfer.",
+          "",
+          "Klik tombol di bawah untuk mulai.",
+        ].join("\n")
+      )
       .setColor(0x2b8cff)
-      .setFooter({ text: "Gunakan tombol untuk memulai transfer data." })
+      .setFooter({ text: "Gunakan tombol di bawah untuk memulai transfer data." })
       .setTimestamp();
 
     const sent = await channel.send({
@@ -551,157 +741,396 @@ function cancelJob(job, reason = "Cancelled by user") {
   } catch (_) {}
 }
 
-function formatResultsTable(results) {
-  return results
-    .map((r, i) => {
-      return `${i + 1}. **${r.datastore}** | key: \`${r.key}\` | status: **${r.status}**`;
-    })
-    .join("\n");
+function getSelectedDatastoresForJob(job) {
+  const names = Array.isArray(job.selectedDatastores) && job.selectedDatastores.length > 0
+    ? job.selectedDatastores
+    : ALL_DATASTORE_NAMES;
+
+  return names
+    .map((name) => DATASTORE_MAP.get(name))
+    .filter(Boolean);
 }
 
-async function processTransferJob(job) {
-  const { ticketChannel, discordUser, robloxUser } = job;
+function buildProgressEmbed(job) {
+  const selectedText = getSelectedDatastoresForJob(job)
+    .map((ds) => `• ${ds.label}`)
+    .join("\n");
 
-  const progressEmbed = new EmbedBuilder()
-    .setTitle("Transfer Data Sedang Diproses")
+  return new EmbedBuilder()
+    .setTitle("⏳ Transfer Data Sedang Diproses")
     .setDescription(
       [
-        `**Username:** ${robloxUser.name}`,
-        `**User ID:** ${robloxUser.id}`,
+        ...formatIdentityLines(job.robloxUser),
         "",
-        "Sedang mengecek datastore source dan memindahkan data yang ditemukan ke target.",
+        "🔄 Sistem sedang memproses transfer data dari **Map Lama** ke **Map Baru**.",
+        "🛡️ Untuk memastikan data benar-benar masuk, setiap datastore akan diproses **3 kali** dengan jeda **3 detik** per proses.",
+        "",
+        "**📦 Datastore yang dipilih:**",
+        selectedText || "-",
+        "",
+        "Mohon tunggu sampai proses selesai. Tombol tutup ticket akan muncul setelah transfer berhasil.",
       ].join("\n")
     )
     .setColor(0xf1c40f)
     .setTimestamp();
+}
 
-  await ticketChannel.send({
-    embeds: [progressEmbed],
-    components: buildCloseTicketComponents(),
-  });
+function buildSuccessSummaryEmbed(job, summary) {
+  const selectedText = getSelectedDatastoresForJob(job)
+    .map((ds) => `• ${ds.label}`)
+    .join("\n");
 
-  const results = [];
-  let foundCount = 0;
-  let movedCount = 0;
-  let skippedCount = 0;
-  let failedCount = 0;
+  return new EmbedBuilder()
+    .setTitle("✅ Transfer Data Berhasil Diproses")
+    .setDescription(
+      [
+        ...formatIdentityLines(job.robloxUser),
+        "",
+        "🎉 Proses transfer data telah selesai diproses.",
+        "",
+        "**📦 Datastore yang diproses:**",
+        selectedText || "-",
+        "",
+        `✅ **Berhasil:** ${summary.success.length}`,
+        `⏭️ **Skip:** ${summary.skipped.length}`,
+        `❌ **Gagal:** ${summary.failed.length}`,
+        "",
+        "📌 Detail per datastore dikirim di bawah ini.",
+        "Kamu bisa klik **🔁 Transfer Ulang** jika ingin langsung menjalankan migrasi lagi.",
+      ].join("\n")
+    )
+    .setColor(0x2ecc71)
+    .setTimestamp();
+}
 
-  for (const ds of DATASTORES) {
-    if (job.cancelled) {
-      throw new Error("JOB_CANCELLED");
+function buildFailureEmbed(job, errorText) {
+  return new EmbedBuilder()
+    .setTitle("❌ Transfer Data Gagal")
+    .setDescription(
+      [
+        ...formatIdentityLines(job.robloxUser),
+        "",
+        "Terjadi kendala saat memproses transfer data.",
+        `**Error:** \`${errorText.slice(0, 3500)}\``,
+      ].join("\n")
+    )
+    .setColor(0xe74c3c)
+    .setTimestamp();
+}
+
+function buildTicketCreatedEmbed(job) {
+  return new EmbedBuilder()
+    .setTitle("🎫 Ticket Transfer Data Berhasil Dibuat")
+    .setDescription(
+      [
+        ...formatIdentityLines(job.robloxUser),
+        "",
+        "Silakan pilih dulu datastore yang ingin ditransfer.",
+        "Setelah itu, klik tombol **✅ Mulai Transfer Sekarang** untuk memulai proses transfer.",
+        "",
+        "⚠️ Selama proses berlangsung, mohon jangan tutup ticket dan jangan spam tombol.",
+      ].join("\n")
+    )
+    .setColor(0x3498db)
+    .setTimestamp();
+}
+
+function buildResultDetailLines(item) {
+  const lines = [
+    `**🗂️ Label User:** ${item.label}`,
+    `**🧩 Datastore Asli:** ${item.datastore}`,
+    `**🔑 Key:** \`${item.key}\``,
+    `**📌 Status:** ${item.status}`,
+  ];
+
+  if (item.reason) {
+    lines.push(`**📝 Keterangan:** ${item.reason}`);
+  }
+
+  if (Object.prototype.hasOwnProperty.call(item, "sourceValue")) {
+    lines.push("**📤 Source / Map Lama:**");
+    lines.push("```json");
+    lines.push(formatJson(item.sourceValue));
+    lines.push("```");
+  }
+
+  if (Object.prototype.hasOwnProperty.call(item, "targetBeforeValue")) {
+    lines.push("**📥 Target Sebelum Transfer / Map Baru:**");
+    lines.push("```json");
+    lines.push(formatJson(item.targetBeforeValue));
+    lines.push("```");
+  }
+
+  if (Object.prototype.hasOwnProperty.call(item, "targetAfterValue")) {
+    lines.push("**✅ Target Sesudah Transfer / Map Baru:**");
+    lines.push("```json");
+    lines.push(formatJson(item.targetAfterValue));
+    lines.push("```");
+  }
+
+  if (Array.isArray(item.roundChecks) && item.roundChecks.length > 0) {
+    lines.push("**🔁 Hasil Verifikasi 3x Proses:**");
+    for (const round of item.roundChecks) {
+      lines.push(
+        `• Ronde ${round.round}: tulis=${round.writeStatus || "-"} | verifikasi=${
+          round.verified ? "berhasil" : "tidak cocok"
+        }`
+      );
+    }
+  }
+
+  return lines;
+}
+
+function splitLinesToChunks(lines, maxLength = 3800) {
+  const chunks = [];
+  let current = "";
+
+  for (const line of lines) {
+    const candidate = current ? `${current}\n${line}` : line;
+    if (candidate.length > maxLength) {
+      if (current) chunks.push(current);
+      current = line;
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+async function sendCategoryDetailEmbeds(ticketChannel, title, color, items) {
+  if (!items || items.length === 0) return;
+
+  const itemBlocks = [];
+  for (const item of items) {
+    itemBlocks.push(...buildResultDetailLines(item), "");
+  }
+
+  const chunks = splitLinesToChunks(itemBlocks, 3800);
+
+  for (let i = 0; i < chunks.length; i++) {
+    const embed = new EmbedBuilder()
+      .setTitle(chunks.length > 1 ? `${title} (${i + 1}/${chunks.length})` : title)
+      .setDescription(chunks[i])
+      .setColor(color)
+      .setTimestamp();
+
+    await ticketChannel.send({ embeds: [embed] });
+  }
+}
+
+function buildDmSuccessText(job, summary) {
+  const selectedText = getSelectedDatastoresForJob(job)
+    .map((ds) => `• ${ds.label}`)
+    .join("\n");
+
+  return [
+    "✅ Transfer data Roblox selesai diproses.",
+    "",
+    ...formatIdentityLines(job.robloxUser).map((line) => line.replace(/\*\*/g, "")),
+    "",
+    "📦 Datastore yang dipilih:",
+    selectedText || "-",
+    "",
+    `✅ Berhasil: ${summary.success.length}`,
+    `⏭️ Skip: ${summary.skipped.length}`,
+    `❌ Gagal: ${summary.failed.length}`,
+    "",
+    "Detail hasil lengkap ada di ticket transfer kamu.",
+    "Silakan masuk kembali ke Map Oleng Beach untuk mengecek hasil data terbaru.",
+  ].join("\n");
+}
+
+function buildDmFailureText(job, err) {
+  return [
+    "❌ Transfer data Roblox gagal.",
+    "",
+    ...formatIdentityLines(job.robloxUser).map((line) => line.replace(/\*\*/g, "")),
+    "",
+    `Error: ${getErrorMessage(err)}`,
+  ].join("\n");
+}
+
+async function transferSingleDatastore(ds, robloxUser, job) {
+  const key = ds.keyBuilder(robloxUser.id);
+
+  try {
+    const sourceData = await getDatastoreEntry(
+      sourceHttp,
+      SOURCE_UNIVERSE_ID,
+      ds.name,
+      ds.scope,
+      key,
+      job
+    );
+
+    const sourceValue = extractEntryValue(sourceData);
+
+    if (typeof sourceValue === "undefined") {
+      return {
+        datastore: ds.name,
+        label: ds.label,
+        key,
+        status: "skip (value undefined)",
+        reason: "Value dari source kosong / undefined.",
+      };
     }
 
-    const key = ds.keyBuilder(robloxUser.id);
-
+    let targetBeforeValue;
     try {
-      const sourceData = await getDatastoreEntry(
-        sourceHttp,
-        SOURCE_UNIVERSE_ID,
+      const targetBeforeData = await getDatastoreEntry(
+        targetHttp,
+        TARGET_UNIVERSE_ID,
         ds.name,
         ds.scope,
         key,
         job
       );
+      targetBeforeValue = extractEntryValue(targetBeforeData);
+    } catch (err) {
+      if (getErrorStatus(err) !== 404) throw err;
+      targetBeforeValue = undefined;
+    }
 
+    const roundChecks = [];
+    let finalWriteStatus = "unknown";
+    let targetAfterValue = undefined;
+
+    for (let round = 1; round <= 3; round++) {
       if (job.cancelled) {
         throw new Error("JOB_CANCELLED");
       }
 
-      const value = extractEntryValue(sourceData);
+      const writeStatus = await writeTargetEntry(ds.name, ds.scope, key, sourceValue, job);
+      finalWriteStatus = writeStatus;
 
-      if (typeof value === "undefined") {
-        results.push({
-          datastore: ds.name,
+      await sleep(3000);
+
+      let verifyValue = undefined;
+      try {
+        const targetAfterData = await getDatastoreEntry(
+          targetHttp,
+          TARGET_UNIVERSE_ID,
+          ds.name,
+          ds.scope,
           key,
-          status: "skip (value undefined)",
-        });
-        skippedCount++;
-        continue;
+          job
+        );
+        verifyValue = extractEntryValue(targetAfterData);
+      } catch (err) {
+        if (getErrorStatus(err) !== 404) throw err;
       }
 
-      foundCount++;
+      const verified = isDeepEqual(sourceValue, verifyValue);
 
-      const writeStatus = await writeTargetEntry(ds.name, ds.scope, key, value, job);
-      movedCount++;
-
-      results.push({
-        datastore: ds.name,
-        key,
-        status: `transferred (${writeStatus})`,
+      roundChecks.push({
+        round,
+        writeStatus,
+        verified,
       });
-    } catch (err) {
-      if (job.cancelled || err.message === "JOB_CANCELLED" || err.code === "ERR_CANCELED") {
-        throw new Error("JOB_CANCELLED");
-      }
 
-      const status = getErrorStatus(err);
-
-      if (status === 404) {
-        results.push({
-          datastore: ds.name,
-          key,
-          status: "skip (key tidak ada)",
-        });
-        skippedCount++;
-      } else {
-        results.push({
-          datastore: ds.name,
-          key,
-          status: `failed (${getErrorMessage(err)})`,
-        });
-        failedCount++;
-      }
+      targetAfterValue = verifyValue;
     }
+
+    const allVerified = roundChecks.every((item) => item.verified);
+
+    if (!allVerified) {
+      return {
+        datastore: ds.name,
+        label: ds.label,
+        key,
+        status: "failed (verifikasi tidak cocok)",
+        reason: "Setelah 3 ronde proses, hasil target masih tidak sama dengan source.",
+        sourceValue,
+        targetBeforeValue,
+        targetAfterValue,
+        roundChecks,
+      };
+    }
+
+    return {
+      datastore: ds.name,
+      label: ds.label,
+      key,
+      status: `transferred (${finalWriteStatus})`,
+      reason: "Transfer dan verifikasi 3 ronde berhasil.",
+      sourceValue,
+      targetBeforeValue,
+      targetAfterValue,
+      roundChecks,
+    };
+  } catch (err) {
+    if (job.cancelled || err.message === "JOB_CANCELLED" || err.code === "ERR_CANCELED") {
+      throw new Error("JOB_CANCELLED");
+    }
+
+    const status = getErrorStatus(err);
+
+    if (status === 404) {
+      return {
+        datastore: ds.name,
+        label: ds.label,
+        key,
+        status: "skip (key tidak ada)",
+        reason: "Key datastore tidak ditemukan di source / map lama.",
+      };
+    }
+
+    return {
+      datastore: ds.name,
+      label: ds.label,
+      key,
+      status: `failed (${getErrorMessage(err)})`,
+      reason: getErrorMessage(err),
+    };
+  }
+}
+
+async function processTransferJob(job) {
+  const { ticketChannel, discordUser, robloxUser } = job;
+
+  const selectedDatastores = getSelectedDatastoresForJob(job);
+
+  await ticketChannel.send({
+    embeds: [buildProgressEmbed(job)],
+  });
+
+  const results = [];
+
+  for (const ds of selectedDatastores) {
+    if (job.cancelled) {
+      throw new Error("JOB_CANCELLED");
+    }
+
+    const result = await transferSingleDatastore(ds, robloxUser, job);
+    results.push(result);
   }
 
   if (job.cancelled) {
     throw new Error("JOB_CANCELLED");
   }
 
-  const detailText = formatResultsTable(results).slice(0, 3800);
-
-  const successEmbed = new EmbedBuilder()
-    .setTitle("Transfer Data Berhasil")
-    .setDescription(
-      [
-        `**Username:** ${robloxUser.name}`,
-        `**User ID:** ${robloxUser.id}`,
-        "",
-        `**Datastore ditemukan:** ${foundCount}`,
-        `**Berhasil dipindahkan:** ${movedCount}`,
-        `**Di-skip:** ${skippedCount}`,
-        `**Gagal:** ${failedCount}`,
-        "",
-        "### Hasil per datastore",
-        detailText || "Tidak ada detail.",
-        "",
-        "**Silakan masuk bermain lagi ke Map Oleng Beach.**",
-      ].join("\n")
-    )
-    .setColor(0x2ecc71)
-    .setTimestamp();
+  const summary = {
+    success: results.filter((r) => String(r.status).startsWith("transferred")),
+    skipped: results.filter((r) => String(r.status).startsWith("skip")),
+    failed: results.filter((r) => String(r.status).startsWith("failed")),
+    all: results,
+  };
 
   await ticketChannel.send({
-    embeds: [successEmbed],
-    components: buildCloseTicketComponents(),
+    embeds: [buildSuccessSummaryEmbed(job, summary)],
+    components: buildRetryTransferComponents(),
   });
+
+  await sendCategoryDetailEmbeds(ticketChannel, "✅ Detail Datastore Berhasil", 0x2ecc71, summary.success);
+  await sendCategoryDetailEmbeds(ticketChannel, "⏭️ Detail Datastore Skip", 0xf1c40f, summary.skipped);
+  await sendCategoryDetailEmbeds(ticketChannel, "❌ Detail Datastore Gagal", 0xe74c3c, summary.failed);
 
   await safeLockTicketChannel(ticketChannel, discordUser.id);
 
-  await safeSendDM(
-    discordUser,
-    [
-      "Transfer data Roblox berhasil.",
-      `Username: ${robloxUser.name}`,
-      `User ID: ${robloxUser.id}`,
-      `Datastore ditemukan: ${foundCount}`,
-      `Berhasil dipindahkan: ${movedCount}`,
-      `Di-skip: ${skippedCount}`,
-      `Gagal: ${failedCount}`,
-      "",
-      "Silakan masuk bermain lagi ke Map Oleng Beach.",
-    ].join("\n")
-  );
+  await safeSendDM(discordUser, buildDmSuccessText(job, summary));
 }
 
 function setupAutoClose(job) {
@@ -756,9 +1185,15 @@ client.on("interactionCreate", async (interaction) => {
       });
 
       const confirmEmbed = new EmbedBuilder()
-        .setTitle("Konfirmasi Sebelum Transfer Data")
+        .setTitle("📢 Konfirmasi Sebelum Transfer Data")
         .setDescription(
-          "Apakah sudah keluar dari map **Oleng Beach**?\nAnda harus keluar map supaya transfer data berhasil."
+          [
+            "Pastikan kamu **sudah keluar dari Map Oleng Beach** sebelum memulai transfer data.",
+            "",
+            "⚠️ Kalau kamu masih berada di dalam map saat transfer dilakukan, data bisa tidak sinkron atau tidak ter-update dengan benar.",
+            "",
+            "Kalau kamu sudah benar-benar keluar dari map, klik tombol di bawah ini.",
+          ].join("\n")
         )
         .setColor(0xf39c12)
         .setTimestamp();
@@ -782,13 +1217,278 @@ client.on("interactionCreate", async (interaction) => {
         return;
       }
 
+      const overwriteEmbed = new EmbedBuilder()
+        .setTitle("⚠️ Konfirmasi Penting Sebelum Lanjut")
+        .setDescription(
+          [
+            "Jika kamu melanjutkan proses transfer data, maka **data yang ada di Map Baru saat ini akan dikembalikan / ditimpa mengikuti data dari Map Lama** yang terkena banned.",
+            "",
+            "Artinya, data terbaru yang sekarang ada di Map Baru bisa **terganti** oleh data lama hasil transfer.",
+            "",
+            "Kalau kamu paham dan setuju, klik **✅ SETUJU**.",
+            "Kalau tidak setuju, klik **❌ TIDAK SETUJU** dan proses akan dibatalkan. Jika ingin transfer lagi nanti, kamu harus klik tombol transfer dari awal.",
+          ].join("\n")
+        )
+        .setColor(0xe67e22)
+        .setTimestamp();
+
+      await interaction.update({
+        embeds: [overwriteEmbed],
+        components: buildOverwriteConfirmComponents(),
+      });
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId === "agree_overwrite_transfer") {
+      const pending = pendingConfirmations.get(interaction.user.id);
+
+      if (!pending) {
+        await interaction.reply({
+          content: "Konfirmasi sudah kadaluarsa. Silakan klik tombol TRANSFER DATA lagi.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
       pendingConfirmations.delete(interaction.user.id);
       await interaction.showModal(buildTransferModal());
       return;
     }
 
+    if (interaction.isButton() && interaction.customId === "disagree_overwrite_transfer") {
+      pendingConfirmations.delete(interaction.user.id);
+
+      await interaction.update({
+        content:
+          "Proses dibatalkan. Jika kamu ingin melakukan transfer data, silakan klik tombol **🚀 TRANSFER DATA** dari awal lagi.",
+        embeds: [],
+        components: [],
+      });
+      return;
+    }
+
     if (interaction.isButton() && interaction.customId === "close_ticket") {
       await closeTicketFlow(interaction);
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId === "retry_transfer") {
+      const channel = interaction.channel;
+      const job = activeJobs.get(channel.id);
+
+      if (!job) {
+        await interaction.reply({
+          content: "Data job transfer tidak ditemukan. Silakan buat ticket baru.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      if (job.running) {
+        await interaction.reply({
+          content: "Transfer masih sedang berjalan. Mohon tunggu sampai selesai.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      job.cancelled = false;
+      job.cancelReason = null;
+      job.abortController = new AbortController();
+      job.running = true;
+
+      await interaction.reply({
+        content: "🔁 Transfer ulang dimulai. Mohon tunggu...",
+        flags: MessageFlags.Ephemeral,
+      });
+
+      processTransferJob(job)
+        .then(async () => {
+          job.running = false;
+          console.log(`Retry job success for ${job.robloxUser.name} (${job.robloxUser.id})`);
+        })
+        .catch(async (err) => {
+          job.running = false;
+
+          const isCancelled =
+            job.cancelled ||
+            err.message === "JOB_CANCELLED" ||
+            err.code === "ERR_CANCELED";
+
+          if (isCancelled) {
+            try {
+              await channel.send(
+                `Transfer data dibatalkan. Alasan: ${job.cancelReason || "ticket ditutup"}`
+              );
+            } catch (_) {}
+            return;
+          }
+
+          try {
+            await channel.send({
+              embeds: [buildFailureEmbed(job, getErrorMessage(err))],
+              components: buildRetryTransferComponents(),
+            });
+
+            await safeSendDM(job.discordUser, buildDmFailureText(job, err));
+          } catch (sendErr) {
+            console.log("Failed to send retry failure message:", getErrorMessage(sendErr));
+          }
+        });
+
+      return;
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId === "select_datastores") {
+      const channel = interaction.channel;
+      const job = activeJobs.get(channel.id);
+
+      if (!job) {
+        await interaction.reply({
+          content: "Ticket/job tidak ditemukan.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      if (interaction.user.id !== job.discordUser.id) {
+        await interaction.reply({
+          content: "Hanya pembuat ticket yang bisa memilih datastore.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      job.selectedDatastores = interaction.values.filter((name) => DATASTORE_MAP.has(name));
+
+      await interaction.update({
+        embeds: [buildDatastoreSelectionEmbed(job)],
+        components: buildDatastoreSelectComponents(job),
+      });
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId === "select_all_datastores") {
+      const channel = interaction.channel;
+      const job = activeJobs.get(channel.id);
+
+      if (!job) {
+        await interaction.reply({
+          content: "Ticket/job tidak ditemukan.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      if (interaction.user.id !== job.discordUser.id) {
+        await interaction.reply({
+          content: "Hanya pembuat ticket yang bisa memilih datastore.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      job.selectedDatastores = [...ALL_DATASTORE_NAMES];
+
+      await interaction.update({
+        embeds: [buildDatastoreSelectionEmbed(job)],
+        components: buildDatastoreSelectComponents(job),
+      });
+      return;
+    }
+
+    if (interaction.isButton() && interaction.customId === "start_selected_transfer") {
+      const channel = interaction.channel;
+      const job = activeJobs.get(channel.id);
+
+      if (!job) {
+        await interaction.reply({
+          content: "Ticket/job tidak ditemukan.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      if (interaction.user.id !== job.discordUser.id) {
+        await interaction.reply({
+          content: "Hanya pembuat ticket yang bisa memulai transfer.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      if (job.running) {
+        await interaction.reply({
+          content: "Transfer sedang berjalan. Mohon tunggu.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      if (!Array.isArray(job.selectedDatastores) || job.selectedDatastores.length === 0) {
+        await interaction.reply({
+          content: "Silakan pilih minimal 1 datastore terlebih dahulu.",
+          flags: MessageFlags.Ephemeral,
+        });
+        return;
+      }
+
+      job.running = true;
+
+      await interaction.update({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("✅ Pilihan Datastore Tersimpan")
+            .setDescription(
+              [
+                ...formatIdentityLines(job.robloxUser),
+                "",
+                "Pilihan datastore kamu sudah disimpan.",
+                "Proses transfer data akan segera dimulai.",
+              ].join("\n")
+            )
+            .setColor(0x57f287)
+            .setTimestamp(),
+        ],
+        components: [],
+      });
+
+      processTransferJob(job)
+        .then(async () => {
+          job.running = false;
+          console.log(`Job success for ${job.robloxUser.name} (${job.robloxUser.id})`);
+        })
+        .catch(async (err) => {
+          job.running = false;
+
+          const isCancelled =
+            job.cancelled ||
+            err.message === "JOB_CANCELLED" ||
+            err.code === "ERR_CANCELED";
+
+          if (isCancelled) {
+            try {
+              if (channel) {
+                await channel.send(
+                  `Transfer data dibatalkan. Alasan: ${job.cancelReason || "ticket ditutup"}`
+                );
+              }
+            } catch (_) {}
+            return;
+          }
+
+          try {
+            await channel.send({
+              embeds: [buildFailureEmbed(job, getErrorMessage(err))],
+              components: buildRetryTransferComponents(),
+            });
+
+            await safeSendDM(job.discordUser, buildDmFailureText(job, err));
+          } catch (sendErr) {
+            console.log("Failed to send failure message:", getErrorMessage(sendErr));
+          }
+        });
+
       return;
     }
 
@@ -835,9 +1535,11 @@ client.on("interactionCreate", async (interaction) => {
         ticketChannel,
         discordUser,
         robloxUser,
+        selectedDatastores: [],
         createdAt: Date.now(),
         cancelReason: null,
         cancelled: false,
+        running: false,
         abortController: new AbortController(),
         autoCloseTimeout: null,
       };
@@ -845,83 +1547,19 @@ client.on("interactionCreate", async (interaction) => {
       activeJobs.set(ticketChannel.id, job);
       setupAutoClose(job);
 
-      const firstEmbed = new EmbedBuilder()
-        .setTitle("Ticket Transfer Data Dibuat")
-        .setDescription(
-          [
-            `**Username:** ${robloxUser.name}`,
-            `**User ID:** ${robloxUser.id}`,
-            "",
-            "Transfer data sedang diproses.",
-            "Jika ticket ditutup sebelum selesai, proses transfer juga akan dibatalkan.",
-          ].join("\n")
-        )
-        .setColor(0x3498db)
-        .setTimestamp();
-
       await ticketChannel.send({
         content: `<@${discordUser.id}>`,
-        embeds: [firstEmbed],
-        components: buildCloseTicketComponents(),
+        embeds: [buildTicketCreatedEmbed(job)],
+      });
+
+      await ticketChannel.send({
+        embeds: [buildDatastoreSelectionEmbed(job)],
+        components: buildDatastoreSelectComponents(job),
       });
 
       await interaction.editReply({
         content: `Ticket berhasil dibuat: ${ticketChannel}`,
       });
-
-      processTransferJob(job)
-        .then(async () => {
-          console.log(`Job success for ${robloxUser.name} (${robloxUser.id})`);
-        })
-        .catch(async (err) => {
-          const isCancelled =
-            job.cancelled ||
-            err.message === "JOB_CANCELLED" ||
-            err.code === "ERR_CANCELED";
-
-          if (isCancelled) {
-            try {
-              if (ticketChannel) {
-                await ticketChannel.send(
-                  `Transfer data dibatalkan. Alasan: ${job.cancelReason || "ticket ditutup"}`
-                );
-              }
-            } catch (_) {}
-            return;
-          }
-
-          try {
-            const failEmbed = new EmbedBuilder()
-              .setTitle("Transfer Data Gagal")
-              .setDescription(
-                [
-                  `**Username:** ${robloxUser.name}`,
-                  `**User ID:** ${robloxUser.id}`,
-                  "",
-                  `Error: \`${getErrorMessage(err).slice(0, 3500)}\``,
-                ].join("\n")
-              )
-              .setColor(0xe74c3c)
-              .setTimestamp();
-
-            await ticketChannel.send({
-              embeds: [failEmbed],
-              components: buildCloseTicketComponents(),
-            });
-
-            await safeSendDM(
-              discordUser,
-              [
-                "Transfer data Roblox gagal.",
-                `Username: ${robloxUser.name}`,
-                `User ID: ${robloxUser.id}`,
-                `Error: ${getErrorMessage(err)}`,
-              ].join("\n")
-            );
-          } catch (sendErr) {
-            console.log("Failed to send failure message:", getErrorMessage(sendErr));
-          }
-        });
 
       return;
     }
