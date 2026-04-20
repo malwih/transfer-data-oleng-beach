@@ -51,7 +51,7 @@ const TARGET_API_KEY = process.env.TARGET_API_KEY;
 const AUTO_SEND_PANEL = String(process.env.AUTO_SEND_PANEL || "true") === "true";
 const PANEL_MESSAGE_TEXT =
   process.env.PANEL_MESSAGE_TEXT ||
-  "Klik tombol di bawah untuk memulai proses transfer data akun kamu dari **Map Lama** ke **Map Baru**.";
+  "Klik tombol di bawah untuk memulai proses transfer data akun kamu dari **MAP BARU** ke **MAP LAMA**.";
 
 // =====================================================
 // VALIDATION
@@ -587,7 +587,7 @@ function buildDatastoreSelectionEmbed(job) {
       [
         ...formatIdentityLines(job.robloxUser),
         "",
-        "Silakan pilih **data mana saja** yang ingin kamu transfer dari **Map Lama** ke **Map Baru**.",
+        "Silakan pilih **data mana saja** yang ingin kamu transfer dari **MAP BARU** ke **MAP LAMA**.",
         "Kamu bisa pilih **satu data**, **beberapa data**, atau langsung klik **Pilih Semua**.",
         "",
         `**📌 Pilihan saat ini:** ${selectedNames || "Belum ada datastore yang dipilih."}`,
@@ -621,7 +621,7 @@ async function ensurePanelMessage() {
         [
           PANEL_MESSAGE_TEXT,
           "",
-          "📌 **Fungsi tombol ini:** memindahkan data akun kamu dari **Map Lama** ke **Map Baru**.",
+          "📌 **Fungsi tombol ini:** memindahkan data akun kamu dari **MAP BARU** ke **MAP LAMA**.",
           "⚠️ Pastikan kamu sudah **keluar dari map** sebelum memulai proses transfer.",
           "",
           "Klik tombol di bawah untuk mulai.",
@@ -780,7 +780,7 @@ function buildProgressEmbed(job) {
       [
         ...formatIdentityLines(job.robloxUser),
         "",
-        "🔄 Sistem sedang memproses transfer data dari **Map Lama** ke **Map Baru**.",
+        "🔄 Sistem sedang memproses transfer data dari **MAP BARU** ke **MAP LAMA**.",
         "🛡️ Untuk memastikan data benar-benar masuk, setiap datastore akan diproses **3 kali** dengan jeda **3 detik** per proses.",
         "",
         "**📦 Datastore yang dipilih:**",
@@ -866,7 +866,7 @@ function buildResultDetailLines(item) {
   }
 
   if (Object.prototype.hasOwnProperty.call(item, "sourceValue")) {
-    lines.push("**📤 Source / Map Lama:**");
+    lines.push("**📤 Source / MAP BARU:**");
     lines.push("```json");
     lines.push(formatJson(item.sourceValue));
     lines.push("```");
@@ -1092,7 +1092,7 @@ async function transferSingleDatastore(ds, robloxUser, job) {
         label: ds.label,
         key,
         status: "skip (key tidak ada)",
-        reason: "Key datastore tidak ditemukan di source / map lama.",
+        reason: "Key datastore tidak ditemukan di source / MAP BARU.",
       };
     }
 
@@ -1250,7 +1250,7 @@ client.on("interactionCreate", async (interaction) => {
         .setTitle("⚠️ Konfirmasi Penting Sebelum Lanjut")
         .setDescription(
           [
-            "Jika kamu melanjutkan proses transfer data, maka **data yang ada di Map Baru saat ini akan dikembalikan / ditimpa mengikuti data dari Map Lama** yang terkena banned.",
+            "Jika kamu melanjutkan proses transfer data, maka **data yang ada di MAP LAMA saat ini akan dikembalikan / ditimpa mengikuti data dari MAP BARU**.",
             "",
             "Artinya, data terbaru yang sekarang ada di Map Baru bisa **terganti** oleh data lama hasil transfer.",
             "",
